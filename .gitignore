@@ -1,0 +1,16 @@
+# build output
+build/
+build-*/
+cmake-build-*/
+out/
+dist/
+MixInspector-*/
+MixInspector-*.zip
+
+# IDEs and OS clutter
+.vs/
+.vscode/
+.idea/
+*.user
+.DS_Store
+Thumbs.db

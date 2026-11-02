@@ -1,0 +1,101 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # lets the release job attach files when you push a v* tag
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libxi-dev
+
+      - name: Configure
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS) cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" ;;
+            Linux) cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ;;
+            *)     cmake -B build ;;
+          esac
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Run analysis tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: bash
+        run: |
+          ART=build/MixInspector_artefacts/Release
+          PKG="MixInspector-${RUNNER_OS}"
+          mkdir -p "$PKG"
+          cp -R "$ART/VST3/MixInspector.vst3" "$PKG/"
+          case "$RUNNER_OS" in
+            Windows) cp "$ART/Standalone/MixInspector.exe" "$PKG/" ;;
+            macOS)   cp -R "$ART/AU/MixInspector.component" "$PKG/"
+                     cp -R "$ART/Standalone/MixInspector.app" "$PKG/"
+                     # ad-hoc signature so Apple Silicon will load the plugin
+                     codesign --force --deep --sign - "$PKG/MixInspector.vst3" "$PKG/MixInspector.component" "$PKG/MixInspector.app" ;;
+            Linux)   cp "$ART/Standalone/MixInspector" "$PKG/" ;;
+          esac
+          cp README.md LICENSE.md "$PKG/"
+          case "$RUNNER_OS" in
+            Windows) 7z a -tzip "$PKG.zip" "$PKG" > /dev/null ;;
+            macOS)   ditto -c -k --keepParent "$PKG" "$PKG.zip" ;;
+            Linux)   zip -qry "$PKG.zip" "$PKG" ;;
+          esac
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      # zipped first so file permissions and macOS bundles survive the upload
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.zip
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true
