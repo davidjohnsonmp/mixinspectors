@@ -14,6 +14,11 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # The project files live in the MixInspector folder of this repository.
+    # If you ever move them to the top level, change this to: .
+    defaults:
+      run:
+        working-directory: MixInspector
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +85,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PKG }}
-          path: ${{ env.PKG }}.zip
+          path: MixInspector/${{ env.PKG }}.zip
 
   release:
     name: Publish release
@@ -99,3 +104,4 @@ jobs:
         with:
           files: artifacts/*.zip
           generate_release_notes: true
+
